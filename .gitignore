@@ -1,0 +1,14 @@
+.runtime/
+test-output/
+settings.json
+cache.json
+.env
+.env.*
+auth.json
+credentials*.json
+*.log
+*.db
+*.db-*
+*.sqlite*
+*.zip
+releases/
