@@ -15,6 +15,11 @@ Windows 桌面 Codex 额度与重置监控工具。托盘图标显示剩余额�
 
 EXE 的设置和公开网页缓存保存在本机 LocalAppData/CodexReset。个人额度只在内存中使用，不保存登录令牌，不发送个人额度给第三方网站。发布包不含用户设置、缓存、登录信息或测试截图；个人信息唯一例外是用户授权的作者卡署名和主页链接。
 
+
+## 下载
+
+https://github.com/Evan-Luxx/Codexreset/releases/tag/v1.0.0
+
 ## 源码启动、测试与构建
 
 在源码目录执行：
