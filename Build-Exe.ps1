@@ -1,6 +1,6 @@
 ﻿$ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Drawing
-$payload=@('CodexReset.ps1','ResetPopup.cs','NewsPopup.cs','CodexQuotaClient.cs','Quota.ps1','QuotaUi.ps1','LoadRuntime.ps1')
+$payload=@('CodexReset.ps1','ResetPopup.cs','NewsPopup.cs','CodexQuotaClient.cs','Quota.ps1','Source.ps1','QuotaUi.ps1','LoadRuntime.ps1')
 $review=@($payload)+@('Launcher.cs','Build-Exe.ps1','README.md','AGENTS.md','agent.md','Assert-UploadPrivacy.ps1')
 & (Join-Path $PSScriptRoot 'Assert-UploadPrivacy.ps1') -Files $review
 $output=Join-Path $PSScriptRoot 'releases'

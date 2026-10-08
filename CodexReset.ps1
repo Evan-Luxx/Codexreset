@@ -3,9 +3,11 @@ $ErrorActionPreference = 'Stop'
 $launchClock=[Diagnostics.Stopwatch]::StartNew()
 $SmokeTest=$env:CODEX_RESET_SMOKE -eq '1'
 . (Join-Path $PSScriptRoot 'Quota.ps1')
+. (Join-Path $PSScriptRoot 'Source.ps1')
 
 function Read-ResetData($json) {
     $d = $json | ConvertFrom-Json
+    if($d.Source -eq 'aihot'){$d.Last=[DateTimeOffset]::Parse([string]$d.Last);return $d}
     if (-not $d.last_reset_at) { throw '数据缺少最近重置时间' }
     $last = [DateTimeOffset]::Parse([string]$d.last_reset_at)
     if ($last -gt [DateTimeOffset]::UtcNow.AddMinutes(5)) { throw '最近重置时间异常' }
@@ -45,6 +47,15 @@ function Read-ChineseNews([string]$html) {
     [pscustomobject]@{Key=$link;Text=$text;Meta='中文网页 · 与来源同步';Link=$link;HasSignal=($verdict -and $verdict -notmatch '暂无')}
 }
 if ($SelfTest) {
+    foreach($value in @($null,0,25,'invalid')){if((Get-RefreshHours $value) -ne 2){throw '默认更新间隔失败'}}
+    foreach($value in 1..24){if((Get-RefreshHours $value) -ne $value){throw '更新间隔范围失败'}}
+    $fixture='[{"_1":2},"loaderData",{"_3":4},"codex-reset",{"_5":6,"_7":8,"_11":-5},"schemaVersion",1,"stats",{"_9":10},"lastResetDate","2026-01-01","current"]'
+    $fixtureHtml='streamController.enqueue('+($fixture|ConvertTo-Json -Compress)+')'
+    $sourceTest=Read-AihotData $fixtureHtml
+    if($sourceTest.Last.ToString('yyyy-MM-dd') -ne '2026-01-01' -or $sourceTest.Signal){throw 'AIHOT 空消息或日期解析失败'}
+    foreach($bad in @('invalid',$fixtureHtml.Replace('schemaVersion','unknown'),$fixtureHtml.Replace('2026-01-01','2099-01-01'))){
+        $rejected=$false;try{$null=Read-AihotData $bad}catch{$rejected=$true};if(-not $rejected){throw 'AIHOT 异常数据未拒绝'}
+    }
     $html='<strong id="forecast-verdict">暂无官方重置信号</strong><div><span id="signal-banner"><span>English</span><a class="signal-evidence-source icon-link" href="https://x.com/example/status/123">原文</a></span></div><li><a href="https://x.com/example/status/456">其他</a><p class="feed-text">其他消息</p></li><li><a href="https://x.com/example/status/123">来源</a><p class="feed-text">虚构中文 &amp; 测试消息</p></li>'
     $news=Read-ChineseNews $html
     if($news.Text -ne '虚构中文 & 测试消息' -or $news.HasSignal){throw '中文来源匹配失败'}
@@ -112,9 +123,10 @@ if($UiTest -or $SmokeTest){
 $script:settings=@{}
 try { if(Test-Path $statePath) { $script:settings=Get-Content $statePath -Raw | ConvertFrom-Json; if($script:settings.manual) { $script:manual=[DateTimeOffset]::Parse($script:settings.manual) } } } catch { $script:settings=@{} }
 if($script:settings.quotaPeriod -in @('five','week')){$script:quotaPeriod=$script:settings.quotaPeriod}
+$script:refreshHours=Get-RefreshHours $script:settings.refreshHours
 $script:hideAuthorReminder=$script:settings.hideAuthorReminder -eq $true
-try { if(Test-Path $cachePath) { $script:data=Read-ResetData (Get-Content $cachePath -Raw); $script:failure='缓存 · 等待联网更新' } } catch {}
-try{if(Test-Path $cachePath){$script:publicRaw=Get-Content $cachePath -Raw|ConvertFrom-Json;$script:chineseAlert=$script:publicRaw.desktopChineseAlert;$script:newsFailure=$true}}catch{}
+try { if(Test-Path $cachePath) { $cached=Read-ResetData (Get-Content $cachePath -Raw);if($cached.Source -ne 'aihot'){throw '旧来源缓存'};$script:data=$cached; $script:failure='缓存 · 等待联网更新' } } catch {}
+try{if(Test-Path $cachePath){$script:publicRaw=Get-Content $cachePath -Raw|ConvertFrom-Json;if($script:publicRaw.Source -eq 'aihot'){$script:chineseAlert=$script:publicRaw.Alert};$script:newsFailure=$true}}catch{}
 $client=New-Object Net.Http.HttpClient
 $client.Timeout=[TimeSpan]::FromSeconds(20)
 $client.DefaultRequestHeaders.UserAgent.ParseAdd('CodexResetDesktop/1.0')
@@ -138,7 +150,7 @@ $author.Add_ReminderChanged({$script:hideAuthorReminder=$author.Suppressed;Save-
 $author.Add_BilibiliClicked({Start-Process 'https://space.bilibili.com/309229096'})
 $author.Add_GithubClicked({Start-Process 'https://github.com/Evan-Luxx'})
 $form.Add_LocationChanged({if($author.Visible){$author.PositionAbove($form.Bounds)}})
-$details.Add_SourceClicked({Start-Process 'https://codex-reset.com/zh/'})
+$details.Add_SourceClicked({Start-Process 'https://aihot.news/codex-reset'})
 $details.Add_NewsSourceClicked({if($details.NewsLink){Start-Process $details.NewsLink}})
 function Set-PersonalTime {
     $details.Suspended=$true
@@ -165,7 +177,23 @@ $null=$periodMenu.DropDownItems.Add($fiveItem);$null=$periodMenu.DropDownItems.A
 $null=$menu.Items.Add('刷新个人额度',$null,{if([DateTimeOffset]::UtcNow -ge $script:nextQuota.AddSeconds(-105)){Start-QuotaFetch}})
 $null=$menu.Items.Add('显示 / 隐藏小区域',$null,{if($form.Visible){$form.Hide()}else{$form.Show()}})
 $null=$menu.Items.Add('打开 / 固定面板',$null,{Open-Panel})
-$null=$menu.Items.Add('刷新数据',$null,{if(-not $script:task -and [DateTimeOffset]::UtcNow -ge $script:nextFetch.AddSeconds(-45)) {$script:nextFetch=[DateTimeOffset]::UtcNow; Start-Fetch}})
+$null=$menu.Items.Add('刷新数据',$null,{if(-not $script:task -and (-not $script:lastAttempt -or [DateTimeOffset]::UtcNow -ge $script:lastAttempt.AddMinutes(1)) -and (-not $script:rateLimitUntil -or [DateTimeOffset]::UtcNow -ge $script:rateLimitUntil)) {$script:nextFetch=[DateTimeOffset]::UtcNow; Start-Fetch}})
+$refreshMenu=New-Object Windows.Forms.ToolStripMenuItem('自动更新数据')
+$refreshWheel=New-Object RefreshWheel
+$refreshWheel.InitializeHours($script:refreshHours)
+$refreshHost=New-Object Windows.Forms.ToolStripControlHost($refreshWheel)
+$refreshHost.Margin=New-Object Windows.Forms.Padding(0)
+$refreshHost.Padding=New-Object Windows.Forms.Padding(0)
+$refreshDrop=New-Object Windows.Forms.ToolStripDropDown
+$null=$refreshDrop.Items.Add($refreshHost)
+$refreshMenu.DropDown=$refreshDrop
+$refreshWheel.Add_ValueChanged({
+        $script:refreshHours=$refreshWheel.Hours
+        $script:nextFetch=[DateTimeOffset]::UtcNow.AddHours($script:refreshHours)
+        if($script:rateLimitUntil -and $script:rateLimitUntil -gt $script:nextFetch){$script:nextFetch=$script:rateLimitUntil}
+        Save-Settings;Update-View
+    })
+$null=$menu.Items.Add($refreshMenu)
 $null=$menu.Items.Add('设置我的时间',$null,{Set-PersonalTime})
 $null=$menu.Items.Add('清除个人时间',$null,{$script:manual=$null;Save-Settings;Update-View})
 $null=$menu.Items.Add('关于作者',$null,{$author.Open($form.Bounds)})
@@ -184,13 +212,13 @@ $label.Add_MouseDown({param($s,$e) if($e.Button -eq 'Left') {$script:drag=$true;
 $label.Add_MouseMove({param($s,$e) if($script:drag) {$dx=$e.X-$script:origin.X; $dy=$e.Y-$script:origin.Y; if([Math]::Abs($dx)+[Math]::Abs($dy) -gt 3) {$script:moved=$true; $form.Location=New-Object Drawing.Point(($form.Left+$dx),($form.Top+$dy))}}})
 $label.Add_MouseUp({param($s,$e) if($script:drag) {$script:drag=$false; if($script:moved){Save-Settings}else{Open-Panel}}})
 function Save-Settings {
-    try { @{x=$form.Left;y=$form.Top;quotaPeriod=$script:quotaPeriod;hideAuthorReminder=$script:hideAuthorReminder;manual=$(if($script:manual){$script:manual.ToString('o')}else{$null})} | ConvertTo-Json | Set-Content $statePath -Encoding UTF8 } catch {}
+    try { @{refreshHours=$script:refreshHours;x=$form.Left;y=$form.Top;quotaPeriod=$script:quotaPeriod;hideAuthorReminder=$script:hideAuthorReminder;manual=$(if($script:manual){$script:manual.ToString('o')}else{$null})} | ConvertTo-Json | Set-Content $statePath -Encoding UTF8 } catch {}
 }
 function Start-Fetch {
     if($script:task){return}
-    $script:nextFetch=[DateTimeOffset]::UtcNow.AddMinutes(1)
-    $script:task=$client.GetAsync('https://codex-reset.com/api/forecast?tz=Asia%2FShanghai')
-    if(-not $script:newsTask){$script:newsTask=$client.GetAsync('https://codex-reset.com/zh/')}
+    $script:lastAttempt=[DateTimeOffset]::UtcNow;$script:nextFetch=$script:lastAttempt.AddMinutes(1)
+    $script:task=$client.GetAsync('https://aihot.news/codex-reset')
+
 }
 function Save-PublicCache {
     if($script:publicRaw){try{$script:publicRaw|Add-Member -NotePropertyName desktopChineseAlert -NotePropertyValue $script:chineseAlert -Force;$script:publicRaw|ConvertTo-Json -Depth 32|Set-Content $cachePath -Encoding UTF8}catch{}}
@@ -200,34 +228,33 @@ function Update-View {
     if($script:data) {
         $last=$script:data.Last.ToOffset([TimeSpan]::FromHours(8))
         $status='等待信号'; $color=$green
-        if($last.Date -eq [DateTimeOffset]::UtcNow.ToOffset([TimeSpan]::FromHours(8)).Date) {$status='已重置 · '+$last.ToString('HH:mm')}
+        if($last.Date -eq [DateTimeOffset]::UtcNow.ToOffset([TimeSpan]::FromHours(8)).Date) {$status='来源记录今日重置'}
     }
-    if($script:data -and $script:data.Signal) {$status='有重置信号 · 查看详情'; $color=$amber}
+    if($script:data) {$status=$script:data.Status; $color=$amber}
     if($script:manual) {$status='个人 '+(Format-Remaining $script:manual ([DateTimeOffset]::UtcNow))}
     if($script:failure) {$color=$amber; if(-not $script:manual){$status='离线 · 查看详情'}}
     $label.Text='❯ Codex · '+$status; $label.ForeColor=$color
     $text="全局重置监控 · 北京时间`r`n`r`n"
     if($script:data) {
-        $text+='上次确认：'+$last.ToString('MM-dd HH:mm')+"`r`n"
-        if($script:data.Signal){$text+="下一次：有官方信号，请查看来源`r`n"}else{$text+="下一次：暂无官方重置预告`r`n"}
-        $text+='历史预测：24h '+$script:data.P24+'% / 48h '+$script:data.P48+"%`r`n"
+        $text+='上次额度重置：'+$last.ToString('yyyy-MM-dd')+"`r`n"
+        $text+=$script:data.Status+"`r`n"+$script:data.Estimate+"`r`n适用范围："+$script:data.Scope+"`r`n"
     }else{$text+="尚未取得有效数据`r`n"}
     if($script:lastFetch){$text+='本机更新：'+$script:lastFetch.ToLocalTime().ToString('HH:mm:ss')+"`r`n"}
     if($script:failure){$text+=$script:failure+"`r`n"}
     if($script:manual){$text+="个人时间（手动）："+$script:manual.LocalDateTime.ToString('MM-dd HH:mm')+"`r`n"}
-    $text+="`r`n历史概率不代表承诺；个人时间需自行设置。"
+    $text+="`r`n发卡不代表额度恢复；预计时间仅供参考。"
 $details.Offline=[bool]$script:failure
 $details.HasSignal=[bool]($script:data -and $script:data.Signal)
-if($script:chineseAlert){$a=$script:chineseAlert;$meta=$a.Meta;if($script:newsFailure){$meta='中文缓存 · 等待同步'};$details.SetNews($a.Key,$a.Text,$meta,$a.Link);$details.HasSignal=[bool]$a.HasSignal}else{$details.SetNews('','正在等待中文来源消息，请稍后刷新。','中文网页 · 等待同步','https://codex-reset.com/zh/')}
+if($script:chineseAlert){$a=$script:chineseAlert;$meta=$a.Meta;if($script:newsFailure){$meta='中文缓存 · 等待同步'};$details.SetNews($a.Key,$a.Text,$meta,$a.Link);$details.HasSignal=[bool]$a.HasSignal}else{$details.SetNews('','正在等待中文来源消息，请稍后刷新。','中文网页 · 等待同步','https://aihot.news/codex-reset')}
 $details.StatusText='等待下一次重置信号'
 $details.SubText='暂无官方时间 · 持续监控中'
 $details.ScopeText='全局监控'
-$details.TimeLabel='上次确认重置 / 北京时间'
+$details.TimeLabel='上次额度重置 / 北京日期'
 $details.TimeText='--.--  --:--'
-if($script:data){$details.TimeText=$last.ToString('MM.dd  HH:mm'); if($script:data.Signal){$details.StatusText='有新的重置信号';$details.SubText='请查看来源核实公告时间'}}
+if($script:data){$details.TimeText=$last.ToString('yyyy.MM.dd');$details.StatusText=$script:data.Status;$details.SubText=$script:data.Estimate}
 if($script:failure){$details.SubText='离线 · 显示缓存，稍后重试'}
 $details.UpdateText='正在连接'
-if($script:lastFetch){$details.UpdateText='已更新 '+$script:lastFetch.ToLocalTime().ToString('HH:mm')}
+if($script:lastFetch){$details.UpdateText='已更新 '+$script:lastFetch.ToLocalTime().ToString('HH:mm')+' · '+$script:refreshHours+'h'}
 elseif($script:data){$details.UpdateText='缓存 · 尚未联网核验'}
 if($script:failure){$details.UpdateText='更新失败 · 保留缓存'}
 if($script:manual){$details.ScopeText='个人倒计时';$details.StatusText='我的额度恢复时间';$details.SubText='手动设置 · 本机时间';$details.TimeLabel='剩余时间 / 到期后请核实额度';$details.TimeText=Format-Remaining $script:manual ([DateTimeOffset]::UtcNow)}
@@ -258,12 +285,12 @@ $timer.Add_Tick({
             $response=$null
             try {
                 $response=$script:task.GetAwaiter().GetResult()
-                if([int]$response.StatusCode -eq 429){$script:nextFetch=[DateTimeOffset]::UtcNow.AddMinutes(15); if($response.Headers.RetryAfter.Delta){$script:nextFetch=[DateTimeOffset]::UtcNow.Add($response.Headers.RetryAfter.Delta)}elseif($response.Headers.RetryAfter.Date){$script:nextFetch=$response.Headers.RetryAfter.Date.Value}; throw '请求过多，稍后重试'}
+                if([int]$response.StatusCode -eq 429){$script:nextFetch=[DateTimeOffset]::UtcNow.AddMinutes(15); if($response.Headers.RetryAfter.Delta){$script:nextFetch=[DateTimeOffset]::UtcNow.Add($response.Headers.RetryAfter.Delta)}elseif($response.Headers.RetryAfter.Date){$script:nextFetch=$response.Headers.RetryAfter.Date.Value}; $script:rateLimitUntil=$script:nextFetch; throw '请求过多，稍后重试'}
                 $null=$response.EnsureSuccessStatusCode()
-                $raw=$response.Content.ReadAsStringAsync().GetAwaiter().GetResult(); $parsed=Read-ResetData $raw
-                if($script:data -and $parsed.Last -gt $script:data.Last){$tray.ShowBalloonTip(5000,'Codex 重置消息','数据源确认了新的全局重置，请核实账户额度。',[Windows.Forms.ToolTipIcon]::Info)}
+                $raw=$response.Content.ReadAsStringAsync().GetAwaiter().GetResult(); $parsed=Read-AihotData $raw
+                if($script:data -and $parsed.Last -gt $script:data.Last){$tray.ShowBalloonTip(5000,'Codex 重置消息','AIHOT 新增了额度重置记录，请在 Codex 内核实。',[Windows.Forms.ToolTipIcon]::Info)}
                 $script:data=$parsed; $script:failure=$null; $script:lastFetch=[DateTimeOffset]::UtcNow
-                $script:publicRaw=$raw|ConvertFrom-Json;Save-PublicCache
+                $script:chineseAlert=$parsed.Alert;$script:newsFailure=$false;$script:publicRaw=$parsed;Save-PublicCache;$script:nextFetch=$script:lastFetch.AddHours($script:refreshHours)
             } catch {$script:failure='联网更新失败 · 保留缓存，稍后重试'} finally {if($response){$response.Dispose()}; $script:task=$null}
         }
         if(-not $UiTest -and -not $script:task -and [DateTimeOffset]::UtcNow -ge $script:nextFetch){Start-Fetch}
@@ -272,6 +299,7 @@ $timer.Add_Tick({
 })
 $form.Add_FormClosed({$script:closed=$true; Save-Settings; $timer.Stop();$quotaClient.Dispose();$gauge.Dispose(); $tray.Visible=$false; $tray.Icon.Dispose(); $tray.Dispose(); $menu.Dispose(); $author.Dispose(); $details.Dispose(); $client.Dispose(); $tip.Dispose(); $timer.Dispose(); $font.Dispose(); $instanceMutex.ReleaseMutex(); $instanceMutex.Dispose()})
 if($UiTest){
+    $script:data=$null;$script:chineseAlert=$null;$script:failure=$null;$script:manual=$null
     $script:quota=Read-QuotaData '{"result":{"rateLimits":{"primary":{"usedPercent":28,"windowDurationMins":300,"resetsAt":1893456000},"secondary":{"usedPercent":62,"windowDurationMins":10080,"resetsAt":1894060800}}}}'
     $script:testStart=[DateTimeOffset]::UtcNow
     $timer.Add_Tick({
@@ -340,7 +368,18 @@ if($UiTest){
             $bitmap=New-Object Drawing.Bitmap($dropdown.Width,$dropdown.Height);$dropdown.DrawToBitmap($bitmap,(New-Object Drawing.Rectangle(0,0,$dropdown.Width,$dropdown.Height)));$bitmap.Save((Join-Path $testDirectory '周期子菜单.png'));$bitmap.Dispose()
             $periodMenu.HideDropDown();$menu.Close()
             $details.Dismiss();if($details.Visible){throw '收起失败'}
-            'PASS: original windows preserved, 3D flip, news scroll, message replacement, return button, tray menu switch, settings persistence, stale data, missing data, exhausted window, icon sizes, dismiss'|Set-Content (Join-Path $testDirectory '额度界面测试.txt') -Encoding UTF8
+            if($refreshMenu.DropDownItems.Count -ne 1 -or $refreshWheel.Height -gt 32){throw '更新间隔选择器尺寸异常'}
+            $refreshMenu.Select();$refreshMenu.ShowDropDown()
+            $refreshWheel.InitializeHours(1);$refreshWheel.Roll(-120)
+            if($script:refreshHours -ne 24 -or (Get-Content $statePath -Raw|ConvertFrom-Json).refreshHours -ne 24){throw '更新间隔保存失败'}
+            if(-not $refreshWheel.Animating -or $refreshWheel.DisplayedPosition -eq 0){throw '滚轮动画未渐进启动'}
+            $refreshWheel.Roll(240)
+            if($script:refreshHours -ne 2){throw '更新间隔循环切换失败'}
+            $watch.Restart();while($watch.ElapsedMilliseconds -lt 300){[Windows.Forms.Application]::DoEvents();[Threading.Thread]::Sleep(10)}
+            if($refreshWheel.Animating -or $refreshWheel.DisplayedPosition -ne 2){throw '滚轮动画未停稳'}
+            $bitmap=New-Object Drawing.Bitmap($refreshDrop.Width,$refreshDrop.Height);$refreshDrop.DrawToBitmap($bitmap,(New-Object Drawing.Rectangle(0,0,$refreshDrop.Width,$refreshDrop.Height)));$bitmap.Save((Join-Path $testDirectory '更新间隔滚轮.png'));$bitmap.Dispose()
+            $refreshMenu.HideDropDown();$menu.Close()
+            'PASS: original windows preserved, 3D flip, news scroll, message replacement, return button, tray menu switch, settings persistence, refresh interval menu and persistence, stale data, missing data, exhausted window, icon sizes, dismiss'|Set-Content (Join-Path $testDirectory '额度界面测试.txt') -Encoding UTF8
         }catch{('FAIL: '+$_)|Set-Content (Join-Path $testDirectory '额度界面测试.txt') -Encoding UTF8}
         $form.Close()
     })

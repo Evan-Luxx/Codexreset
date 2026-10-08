@@ -94,7 +94,7 @@ public partial class ResetPopup : Form {
         using(var p=new Pen(border)){g.DrawLine(p,23,200,329,200);}
         DrawText(g,"● "+UpdateText,"Noto Sans SC",11,Offline?amber:muted,23,217,175,16);
         DrawText(g,"查看来源 ↗","Noto Sans SC",11,green,242,217,87,16);
-        DrawText(g,"Data: codex-reset.com","Consolas",10,muted,23,249,210,15);
+        DrawText(g,"Data: aihot.news","Consolas",10,muted,23,249,210,15);
         DrawButton(g,"重置消息 ↻");
     }
     protected override void OnMouseDown(MouseEventArgs e){base.OnMouseDown(e);if(e.Button!=MouseButtons.Left)return;if(HandleNewsMouse(e))return;if(e.Y>=207&&e.Y<=239&&e.X>230){if(SourceClicked!=null)SourceClicked(this,EventArgs.Empty);}else{Pinned=true;Invalidate();}}
@@ -130,6 +130,40 @@ public sealed class AuthorCard : Form {
     protected override void Dispose(bool disposing){if(disposing){timer.Stop();timer.Dispose();font.Dispose();title.Dispose();if(Region!=null)Region.Dispose();}base.Dispose(disposing);}
 }
 
+public sealed class RefreshWheel : Control {
+    readonly Timer timer=new Timer();
+    readonly System.Diagnostics.Stopwatch clock=System.Diagnostics.Stopwatch.StartNew();
+    readonly Font wheelFont=new Font("Consolas",16,FontStyle.Regular,GraphicsUnit.Pixel);
+    double shown=2,from=2,target=2;long started;int hours=2,remainder,dragY;bool dragging;
+    public event EventHandler ValueChanged;
+    public int Hours {get{return hours;}}
+    public double DisplayedPosition {get{return shown;}}
+    public bool Animating {get{return timer.Enabled;}}
+    public RefreshWheel(){Size=new Size(66,30);DoubleBuffered=true;TabStop=true;AccessibleName="自动更新间隔，1 至 24 小时";BackColor=ColorTranslator.FromHtml("#0B1210");ForeColor=ColorTranslator.FromHtml("#43EF8B");Cursor=Cursors.SizeNS;timer.Interval=16;timer.Tick+=Animate;}
+    static int Wrap(int value){return ((value-1)%24+24)%24+1;}
+    public void InitializeHours(int value){hours=Math.Max(1,Math.Min(24,value));shown=from=target=hours;timer.Stop();Invalidate();}
+    public void Step(int steps){if(steps==0)return;from=shown;target+=steps;hours=Wrap((int)target);started=clock.ElapsedMilliseconds;timer.Start();Invalidate();if(ValueChanged!=null)ValueChanged(this,EventArgs.Empty);}
+    public void Roll(int delta){remainder+=delta;int steps=remainder/120;remainder%=120;Step(steps);}
+    void Animate(object sender,EventArgs e){double t=Math.Min(1,(clock.ElapsedMilliseconds-started)/220.0);shown=from+(target-from)*(1-Math.Pow(1-t,3));if(t>=1){shown=from=target=hours;timer.Stop();}Invalidate();}
+    protected override void OnMouseEnter(EventArgs e){base.OnMouseEnter(e);Focus();}
+    protected override void OnMouseWheel(MouseEventArgs e){base.OnMouseWheel(e);Roll(e.Delta);}
+    protected override void OnMouseDown(MouseEventArgs e){base.OnMouseDown(e);if(e.Button==MouseButtons.Left){Focus();dragging=true;dragY=e.Y;Capture=true;}}
+    protected override void OnMouseMove(MouseEventArgs e){base.OnMouseMove(e);if(dragging){int steps=(dragY-e.Y)/12;if(steps!=0){dragY-=steps*12;Step(steps);}}}
+    protected override void OnMouseUp(MouseEventArgs e){base.OnMouseUp(e);dragging=false;Capture=false;}
+    protected override void OnMouseCaptureChanged(EventArgs e){base.OnMouseCaptureChanged(e);if(!Capture)dragging=false;}
+    protected override bool IsInputKey(Keys key){return key==Keys.Up||key==Keys.Down||base.IsInputKey(key);}
+    protected override void OnKeyDown(KeyEventArgs e){if(e.KeyCode==Keys.Up||e.KeyCode==Keys.Down){Step(e.KeyCode==Keys.Up?1:-1);e.Handled=true;}base.OnKeyDown(e);}
+    protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);var g=e.Graphics;g.SetClip(new Rectangle(1,1,Width-2,Height-2));int center=(int)Math.Floor(shown);
+        using(var format=new StringFormat()){format.Alignment=StringAlignment.Center;format.LineAlignment=StringAlignment.Center;
+            for(int n=center-1;n<=center+2;n++){float offset=(float)((n-shown)*26);float scale=(float)Math.Max(.3,Math.Cos(Math.Min(1,Math.Abs(offset)/30)*Math.PI/2));var state=g.Save();g.TranslateTransform(Width/2f,Height/2f+offset);g.ScaleTransform(1,scale);using(var brush=new SolidBrush(Color.FromArgb((int)(255*Math.Max(.15,1-Math.Abs(offset)/32)),ForeColor)))g.DrawString(Wrap(n)+"h",wheelFont,brush,new RectangleF(-Width/2f,-13,Width,26),format);g.Restore(state);}
+        }
+        using(var shade=new LinearGradientBrush(new Rectangle(0,0,Width,8),BackColor,Color.FromArgb(0,BackColor),90f))g.FillRectangle(shade,0,0,Width,8);
+        using(var shade=new LinearGradientBrush(new Rectangle(0,Height-8,Width,8),Color.FromArgb(0,BackColor),BackColor,90f))g.FillRectangle(shade,0,Height-8,Width,8);
+        g.ResetClip();using(var pen=new Pen(ColorTranslator.FromHtml("#294438")))g.DrawRectangle(pen,0,0,Width-1,Height-1);
+    }
+    protected override void Dispose(bool disposing){if(disposing){timer.Stop();timer.Dispose();wheelFont.Dispose();}base.Dispose(disposing);}
+}
+
 public sealed class ResetMenu : ContextMenuStrip {
     readonly Font menuFont=new Font("Microsoft YaHei UI",9f,FontStyle.Regular);
     public ResetMenu(){Font=menuFont;Renderer=new ResetMenuRenderer();ShowImageMargin=false;ShowCheckMargin=true;BackColor=ColorTranslator.FromHtml("#0B1210");ForeColor=ColorTranslator.FromHtml("#E0EBE5");Padding=new Padding(6);DropShadowEnabled=false;}
@@ -138,7 +172,7 @@ public sealed class ResetMenu : ContextMenuStrip {
         strip.Renderer=Renderer;strip.Font=menuFont;strip.BackColor=BackColor;strip.ForeColor=ForeColor;strip.Padding=new Padding(6);
         var dropdown=strip as ToolStripDropDownMenu;
         if(dropdown!=null){dropdown.ShowImageMargin=false;dropdown.ShowCheckMargin=true;dropdown.DropShadowEnabled=false;}
-        foreach(ToolStripItem item in strip.Items){item.ForeColor=ForeColor;item.Font=menuFont;if(!(item is ToolStripSeparator))item.Padding=new Padding(5,6,12,6);var menu=item as ToolStripMenuItem;if(menu!=null&&menu.HasDropDownItems)Style(menu.DropDown);}
+        foreach(ToolStripItem item in strip.Items){if(item is ToolStripControlHost)continue;item.ForeColor=ForeColor;item.Font=menuFont;if(!(item is ToolStripSeparator)&&!(item is ToolStripControlHost))item.Padding=new Padding(5,6,12,6);var menu=item as ToolStripMenuItem;if(menu!=null&&menu.HasDropDownItems)Style(menu.DropDown);}
     }
     protected override void Dispose(bool disposing){base.Dispose(disposing);if(disposing)menuFont.Dispose();}
 }

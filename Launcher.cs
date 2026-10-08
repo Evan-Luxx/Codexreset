@@ -7,9 +7,9 @@ using System.Windows.Forms;
 
 [assembly: AssemblyTitle("Codex Reset")]
 [assembly: AssemblyProduct("Codex Reset")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
-[assembly: AssemblyInformationalVersion("1.0.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyInformationalVersion("1.1.0")]
 
 internal static class Launcher {
     [STAThread]

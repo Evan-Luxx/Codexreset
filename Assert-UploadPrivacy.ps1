@@ -3,7 +3,7 @@
     [string[]]$Files
 )
 $ErrorActionPreference='Stop'
-$allowed=@('启动.cmd','CodexReset.ps1','ResetPopup.cs','NewsPopup.cs','CodexQuotaClient.cs','Quota.ps1','QuotaUi.ps1','LoadRuntime.ps1','Launcher.cs','Build-Exe.ps1','README.md','AGENTS.md','agent.md','.gitignore','Assert-UploadPrivacy.ps1')
+$allowed=@('启动.cmd','CodexReset.ps1','ResetPopup.cs','NewsPopup.cs','CodexQuotaClient.cs','Quota.ps1','Source.ps1','QuotaUi.ps1','LoadRuntime.ps1','Launcher.cs','Build-Exe.ps1','README.md','AGENTS.md','agent.md','.gitignore','Assert-UploadPrivacy.ps1')
 $rootPath=[IO.Path]::GetFullPath($Root).TrimEnd([char[]]'\/')
 if(-not (Test-Path -LiteralPath $rootPath -PathType Container)){throw '上传候选目录不存在'}
 if(-not $Files){

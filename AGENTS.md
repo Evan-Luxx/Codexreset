@@ -1,6 +1,6 @@
 ﻿# CodexReset
 
-Windows 桌面额度与重置监控工具，使用 PowerShell 和 C# WinForms。个人额度来自本机已登录的 Codex App Server，全局重置数据来自 `codex-reset.com`；保留手动倒计时。
+Windows 桌面额度与重置监控工具，使用 PowerShell 和 C# WinForms。个人额度来自本机已登录的 Codex App Server，全局重置数据来自 `aihot.news/codex-reset`；保留手动倒计时。
 
 ## 项目结构
 
@@ -20,7 +20,7 @@ Windows 桌面额度与重置监控工具，使用 PowerShell 和 C# WinForms。
 
 ## 开发约定
 
-- 发布隐私唯一例外是作者卡中的 Evan-Luxx 署名及用户指定的 B站、GitHub 主页；其他任何用户或开发者隐私不得发布。每次按 agent.md 检查最终发布内容，EXE 构建必须核验实际嵌入资源。
+- 发布隐私唯一例外是作者卡及 Git 提交元数据中的 Evan-Luxx / EvanLux 署名及用户指定的 B站、GitHub 主页；Git 作者和提交者邮箱必须为空；其他任何用户或开发者隐私不得发布。每次按 agent.md 检查最终发布内容，EXE 构建必须核验实际嵌入资源。
 
 - 源码及相关资料保留在本项目目录，遵循上级 `../AGENTS.md`。
 - 保留用户已有修改；不要覆盖或提交无关的 `settings.json`、`cache.json` 运行数据变更。
