@@ -5,6 +5,33 @@ $SmokeTest=$env:CODEX_RESET_SMOKE -eq '1'
 . (Join-Path $PSScriptRoot 'Quota.ps1')
 . (Join-Path $PSScriptRoot 'Source.ps1')
 
+function Set-Autostart([bool]$enabled,[string]$path) {
+    if(-not $enabled){
+        if(Test-Path -LiteralPath $path){Remove-Item -LiteralPath $path -Force}
+        return
+    }
+    $shell=New-Object -ComObject WScript.Shell
+    $shortcut=$null
+    try {
+        $shortcut=$shell.CreateShortcut($path)
+        if($env:CODEX_RESET_LAUNCHER -and (Test-Path -LiteralPath $env:CODEX_RESET_LAUNCHER -PathType Leaf)){
+            $shortcut.TargetPath=$env:CODEX_RESET_LAUNCHER
+            $shortcut.Arguments=''
+            $shortcut.WorkingDirectory=Split-Path -Parent $env:CODEX_RESET_LAUNCHER
+        } else {
+            $shortcut.TargetPath=Join-Path $PSHOME 'powershell.exe'
+            $shortcut.Arguments='-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "'+(Join-Path $PSScriptRoot 'CodexReset.ps1')+'"'
+            $shortcut.WorkingDirectory=$PSScriptRoot
+        }
+        $shortcut.WindowStyle=7
+        $shortcut.Description='Codex Reset 开机自启'
+        $shortcut.Save()
+    } finally {
+        if($null -ne $shortcut){$null=[Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcut)}
+        $null=[Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)
+    }
+}
+
 function Read-ResetData($json) {
     $d = $json | ConvertFrom-Json
     if($d.Source -eq 'aihot'){$d.Last=[DateTimeOffset]::Parse([string]$d.Last);return $d}
@@ -120,6 +147,8 @@ if($UiTest -or $SmokeTest){
     $null=New-Item -ItemType Directory -Force -Path $testDirectory
     $statePath=Join-Path $testDirectory 'settings.json';$cachePath=Join-Path $testDirectory 'cache.json'
 }
+$autostartPath=Join-Path ([Environment]::GetFolderPath('Startup')) 'CodexReset.lnk'
+if($UiTest -or $SmokeTest){$autostartPath=Join-Path $testDirectory 'CodexReset.lnk'}
 $script:settings=@{}
 try { if(Test-Path $statePath) { $script:settings=Get-Content $statePath -Raw | ConvertFrom-Json; if($script:settings.manual) { $script:manual=[DateTimeOffset]::Parse($script:settings.manual) } } } catch { $script:settings=@{} }
 if($script:settings.quotaPeriod -in @('five','week')){$script:quotaPeriod=$script:settings.quotaPeriod}
@@ -129,7 +158,7 @@ try { if(Test-Path $cachePath) { $cached=Read-ResetData (Get-Content $cachePath 
 try{if(Test-Path $cachePath){$script:publicRaw=Get-Content $cachePath -Raw|ConvertFrom-Json;if($script:publicRaw.Source -eq 'aihot'){$script:chineseAlert=$script:publicRaw.Alert};$script:newsFailure=$true}}catch{}
 $client=New-Object Net.Http.HttpClient
 $client.Timeout=[TimeSpan]::FromSeconds(20)
-$client.DefaultRequestHeaders.UserAgent.ParseAdd('CodexResetDesktop/1.0')
+$client.DefaultRequestHeaders.UserAgent.ParseAdd('CodexResetDesktop/1.1.1')
 
 $form=New-Object Windows.Forms.Form
 $form.Text='Codex Reset'; $form.FormBorderStyle='None'; $form.Size=New-Object Drawing.Size(244,34)
@@ -194,11 +223,19 @@ $refreshWheel.Add_ValueChanged({
         Save-Settings;Update-View
     })
 $null=$menu.Items.Add($refreshMenu)
+$autostartItem=New-Object Windows.Forms.ToolStripMenuItem('开机自启')
+$autostartItem.Checked=Test-Path -LiteralPath $autostartPath
+$autostartItem.Add_Click({
+    try {Set-Autostart (-not $autostartItem.Checked) $autostartPath}
+    catch {$null=[Windows.Forms.MessageBox]::Show('无法更改开机自启设置，请检查启动目录权限。','Codex Reset','OK','Warning')}
+    finally {$autostartItem.Checked=Test-Path -LiteralPath $autostartPath}
+})
+$null=$menu.Items.Add($autostartItem)
 $null=$menu.Items.Add('设置我的时间',$null,{Set-PersonalTime})
 $null=$menu.Items.Add('清除个人时间',$null,{$script:manual=$null;Save-Settings;Update-View})
 $null=$menu.Items.Add('关于作者',$null,{$author.Open($form.Bounds)})
 $details.ContextMenuStrip=$menu
-$menu.Add_Opening({$details.Suspended=$true})
+$menu.Add_Opening({$details.Suspended=$true;$autostartItem.Checked=Test-Path -LiteralPath $autostartPath})
 $menu.Add_Closed({$details.Suspended=$false})
 $null=$menu.Items.Add('退出',$null,{$script:closed=$true; $form.Close()})
 $menu.ApplyTheme()
@@ -379,7 +416,26 @@ if($UiTest){
             if($refreshWheel.Animating -or $refreshWheel.DisplayedPosition -ne 2){throw '滚轮动画未停稳'}
             $bitmap=New-Object Drawing.Bitmap($refreshDrop.Width,$refreshDrop.Height);$refreshDrop.DrawToBitmap($bitmap,(New-Object Drawing.Rectangle(0,0,$refreshDrop.Width,$refreshDrop.Height)));$bitmap.Save((Join-Path $testDirectory '更新间隔滚轮.png'));$bitmap.Dispose()
             $refreshMenu.HideDropDown();$menu.Close()
-            'PASS: original windows preserved, 3D flip, news scroll, message replacement, return button, tray menu switch, settings persistence, refresh interval menu and persistence, stale data, missing data, exhausted window, icon sizes, dismiss'|Set-Content (Join-Path $testDirectory '额度界面测试.txt') -Encoding UTF8
+            try {
+                Set-Autostart $false $autostartPath
+                $autostartItem.Checked=$false
+                $autostartItem.PerformClick()
+                if(-not $autostartItem.Checked){throw '开机自启开启失败'}
+                $startupShell=New-Object -ComObject WScript.Shell
+                $startupShortcut=$null
+                try {
+                    $startupShortcut=$startupShell.CreateShortcut($autostartPath)
+                    if($env:CODEX_RESET_LAUNCHER){
+                        if($startupShortcut.TargetPath -ne $env:CODEX_RESET_LAUNCHER -or $startupShortcut.Arguments){throw 'EXE 自启命令错误'}
+                    } elseif($startupShortcut.TargetPath -ne (Join-Path $PSHOME 'powershell.exe') -or -not $startupShortcut.Arguments.Contains('"'+(Join-Path $PSScriptRoot 'CodexReset.ps1')+'"')){throw '源码自启命令错误'}
+                } finally {
+                    if($null -ne $startupShortcut){$null=[Runtime.InteropServices.Marshal]::FinalReleaseComObject($startupShortcut)}
+                    $null=[Runtime.InteropServices.Marshal]::FinalReleaseComObject($startupShell)
+                }
+                $autostartItem.PerformClick()
+                if($autostartItem.Checked -or (Test-Path -LiteralPath $autostartPath)){throw '开机自启关闭失败'}
+            } finally {Set-Autostart $false $autostartPath}
+            'PASS: original windows preserved, 3D flip, news scroll, message replacement, return button, tray menu switch, autostart enable/disable and command, settings persistence, refresh interval menu and persistence, stale data, missing data, exhausted window, icon sizes, dismiss'|Set-Content (Join-Path $testDirectory '额度界面测试.txt') -Encoding UTF8
         }catch{('FAIL: '+$_)|Set-Content (Join-Path $testDirectory '额度界面测试.txt') -Encoding UTF8}
         $form.Close()
     })

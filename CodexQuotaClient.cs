@@ -28,7 +28,7 @@ public sealed class CodexQuotaClient : IDisposable {
         var clock = Stopwatch.StartNew();
         var json = new JavaScriptSerializer();
         try {
-            p.StandardInput.WriteLine("{\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"codex_reset\",\"version\":\"1.1.0\"}}}");
+            p.StandardInput.WriteLine("{\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"codex_reset\",\"version\":\"1.1.1\"}}}");
             p.StandardInput.Flush();
             bool initialized = false;
             while (clock.ElapsedMilliseconds < 25000) {

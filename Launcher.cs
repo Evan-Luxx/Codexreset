@@ -7,9 +7,9 @@ using System.Windows.Forms;
 
 [assembly: AssemblyTitle("Codex Reset")]
 [assembly: AssemblyProduct("Codex Reset")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
-[assembly: AssemblyInformationalVersion("1.1.0")]
+[assembly: AssemblyVersion("1.1.1.0")]
+[assembly: AssemblyFileVersion("1.1.1.0")]
+[assembly: AssemblyInformationalVersion("1.1.1")]
 
 internal static class Launcher {
     [STAThread]
@@ -35,6 +35,7 @@ internal static class Launcher {
             info.Arguments="-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File \""+Path.Combine(directory,"CodexReset.ps1")+"\""+mode;
             info.UseShellExecute=false;info.CreateNoWindow=true;info.WorkingDirectory=directory;
             Environment.SetEnvironmentVariable("CODEX_RESET_DATA_DIR",root);
+            Environment.SetEnvironmentVariable("CODEX_RESET_LAUNCHER",assembly.Location);
             using(var process=Process.Start(info)){if(mode.Length>0){process.WaitForExit();return process.ExitCode;}}
             return 0;
         }catch(Exception ex){var test=Environment.GetEnvironmentVariable("CODEX_RESET_TEST_OUT");if(!String.IsNullOrEmpty(test)&&args.Length>0){File.WriteAllText(Path.Combine(test,"launcher-error.txt"),ex.ToString());}else MessageBox.Show("启动失败："+ex.Message,"Codex Reset",MessageBoxButtons.OK,MessageBoxIcon.Error);return 1;}
